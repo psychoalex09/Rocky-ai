@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#080d19">
+<title>ROCKY AI</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080d19;color:#edf3ff;font:16px system-ui,sans-serif}
+main{max-width:760px;margin:auto;padding:22px 15px}
+header{text-align:center;padding:18px 0}
+.orb{width:76px;height:76px;margin:auto;border-radius:50%;
+background:radial-gradient(circle at 35% 30%,#c4b5fd,#6366f1 45%,#111827 75%);
+box-shadow:0 0 35px #6366f177}
+h1{letter-spacing:4px;margin:15px 0 5px}
+small,.muted{color:#a7b4d0}
+#status{font-size:13px}
+#chat{height:48vh;min-height:260px;overflow:auto;padding:10px 0}
+.msg{padding:12px 14px;margin:10px 0;border-radius:15px;
+white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.user{background:#24365c;margin-left:12%;border:1px solid #3b5180}
+.bot{background:#151e30;margin-right:5%;border:1px solid #263650}
+form{display:flex;gap:8px;flex-wrap:wrap}
+textarea{flex:1;min-width:180px;resize:vertical;min-height:48px;
+background:#111a2c;color:white;border:1px solid #394966;
+border-radius:12px;padding:13px;font:inherit}
+button{border:0;border-radius:12px;padding:12px 15px;
+background:#7165f5;color:white;font-weight:700;font-size:15px}
+button:disabled{opacity:.5}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.tools button{background:#1b2942}
+#mic.listening{background:#c0264c}
+footer{text-align:center;margin:20px 0;color:#94a3b8;font-size:12px}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="orb"></div>
+<h1>ROCKY AI</h1>
+<div class="muted">Your personal AI assistant</div>
+<p id="status">Ready when you are.</p>
+</header>
+
+<section id="chat" aria-live="polite">
+<div class="msg bot">হ্যালো Rocky! আমি তোমার AI assistant।
+বাংলা, Banglish বা English-এ প্রশ্ন করো। 🎙️</div>
+</section>
+
+<div class="tools">
+<button type="button" id="mic">🎙️ Speak</button>
+<button type="button" id="voice">🔊 Voice: ON</button>
+<button type="button" id="clear">🗑️ Clear chat</button>
+</div>
+
+<form id="form">
+<textarea id="input" placeholder="Type your message..." rows="2" required></textarea>
+<button id="send" type="submit">Send ➤</button>
+</form>
+<footer>ROCKY AI · Personal project · AI may make mistakes</footer>
+</main>
+
+<script>
+const chat=document.getElementById('chat');
+const form=document.getElementById('form');
+const input=document.getElementById('input');
+const send=document.getElementById('send');
+const status=document.getElementById('status');
+const mic=document.getElementById('mic');
+const voiceBtn=document.getElementById('voice');
+
+let history=[];
+let voiceOn=true;
+let busy=false;
+
+function addMessage(text,who){
+  const div=document.createElement('div');
+  div.className='msg '+who;
+  div.textContent=text;
+  chat.appendChild(div);
+  chat.scrollTop=chat.scrollHeight;
+  return div;
+}
+
+function saveHistory(){
+  try{
+    localStorage.setItem('rocky-ai-history',JSON.stringify(history.slice(-20)));
+  }catch(e){}
+}
+
+function loadHistory(){
+  try{
+    history=JSON.parse(localStorage.getItem('rocky-ai-history')||'[]');
+    if(!Array.isArray(history)) history=[];
+  }catch(e){history=[]}
+  history.slice(-20).forEach(m=>{
+    addMessage(m.role==='user'?m.text:m.text,m.role==='user'?'user':'bot');
+  });
+}
+
+function speak(text){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const utterance=new SpeechSynthesisUtterance(text);
+  utterance.lang=/[\u0980-\u09FF]/.test(text)?'bn-IN':'en-IN';
+  utterance.rate=1;
+  speechSynthesis.speak(utterance);
+}
+
+voiceBtn.onclick=()=>{
+  voiceOn=!voiceOn;
+  voiceBtn.textContent='🔊 Voice: '+(voiceOn?'ON':'OFF');
+  if(!voiceOn && 'speechSynthesis' in window)speechSynthesis.cancel();
+};
+
+document.getElementById('clear').onclick=()=>{
+  if(!confirm('Clear saved chat history?'))return;
+  history=[];
+  localStorage.removeItem('rocky-ai-history');
+  chat.replaceChildren();
+  addMessage('Chat cleared. কী নিয়ে কথা বলবে?','bot');
+};
+
+form.onsubmit=async e=>{
+  e.preventDefault();
+  if(busy)return;
+  const text=input.value.trim();
+  if(!text)return;
+
+  busy=true;send.disabled=true;
+  addMessage(text,'user');
+  input.value='';
+  history.push({role:'user',text});
+  const loading=addMessage('Thinking...','bot');
+  status.textContent='Thinking...';
+
+  try{
+    const res=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:text,history:history.slice(-12,-1)})
+    });
+    const data=await res.json();
+    if(!res.ok)throw new Error(data.error||'Request failed');
+    const answer=data.text||'No response received.';
+    loading.textContent=answer;
+    history.push({role:'assistant',text:answer});
+    history=history.slice(-20);
+    saveHistory();
+    status.textContent='Ready';
+    speak(answer);
+  }catch(err){
+    loading.textContent='Error: '+err.message+
+      '\nCheck the API key, quota and internet connection.';
+    status.textContent='Connection error';
+  }finally{
+    busy=false;send.disabled=false;input.focus();
+    chat.scrollTop=chat.scrollHeight;
+  }
+};
+
+const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recognition=null;
+
+if(Recognition){
+  recognition=new Recognition();
+  recognition.lang='bn-IN';
+  recognition.interimResults=false;
+  recognition.onstart=()=>{
+    mic.classList.add('listening');
+    mic.textContent='🔴 Listening...';
+    status.textContent='Listening...';
+  };
+  recognition.onresult=e=>{
+    input.value=e.results[0][0].transcript;
+    status.textContent='Voice captured. Press Send.';
+    input.focus();
+  };
+  recognition.onerror=e=>{
+    status.textContent='Mic error: '+e.error;
+  };
+  recognition.onend=()=>{
+    mic.classList.remove('listening');
+    mic.textContent='🎙️ Speak';
+  };
+  mic.onclick=()=>{
+    try{recognition.start()}catch(e){}
+  };
+}else{
+  mic.onclick=()=>alert('Voice input is not supported here. Try an updated Chrome browser.');
+}
+loadHistory();
+</script>
+</body>
+</html>
